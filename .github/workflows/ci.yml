@@ -8,24 +8,8 @@ on:
 
 jobs:
   test:
-    name: Test on ${{ matrix.os }} (${{ matrix.arch }})
-    runs-on: ${{ matrix.os }}-${{ matrix.arch }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            arch: amd64
-            goarch: amd64
-          - os: ubuntu-latest
-            arch: arm64
-            goarch: arm64
-          - os: macos-latest
-            arch: amd64
-            goarch: amd64
-          - os: macos-latest
-            arch: arm64
-            goarch: arm64
+    name: Test
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -38,11 +22,51 @@ jobs:
       - name: Run tests
         run: go test -v ./...
 
-      - name: Build
+      - name: Build (amd64)
         run: go build -o bin/docker-credential-passage passage/cmd/main.go
 
       - name: Lint
         run: go vet ./...
+
+  build-cross:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: linux
+            goarch: "386"
+          - goos: linux
+            goarch: arm
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          OUTPUT_NAME="docker-credential-passage-${{ matrix.goos }}-${{ matrix.goarch }}"
+          go build -ldflags="-s -w" -o "bin/${OUTPUT_NAME}" passage/cmd/main.go
+          
+          # Verify binary was created
+          ls -la "bin/${OUTPUT_NAME}"
+          file "bin/${OUTPUT_NAME}"
 
   lint:
     name: Lint

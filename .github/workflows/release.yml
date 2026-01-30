@@ -1,87 +1,54 @@
 name: Release
-
 on:
   push:
     tags:
       - 'v*'
-
 permissions:
   contents: write
-
 jobs:
   build:
-    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
       matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
         include:
-          # Linux builds
-          - goos: linux
-            goarch: amd64
-            runner: ubuntu-latest
-          - goos: linux
-            goarch: arm64
-            runner: ubuntu-latest
           - goos: linux
             goarch: "386"
-            runner: ubuntu-latest
           - goos: linux
             goarch: arm
-            runner: ubuntu-latest
-          # macOS builds
-          - goos: darwin
-            goarch: amd64
-            runner: macos-latest
-          - goos: darwin
-            goarch: arm64
-            runner: macos-latest
-          # Windows builds
-          - goos: windows
-            goarch: amd64
-            runner: ubuntu-latest
-          - goos: windows
-            goarch: arm64
-            runner: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: 'stable'
 
-      - name: Build
+      - name: Build and package
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ github.ref_name }}
         run: |
-          OUTPUT_NAME="docker-credential-passage-${{ matrix.goos }}-${{ matrix.goarch }}"
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            OUTPUT_NAME="${OUTPUT_NAME}.exe"
-          fi
-          VERSION="${GITHUB_REF#refs/tags/}"
-          go build -ldflags="-s -w -X main.Version=${VERSION}" -o "bin/${OUTPUT_NAME}" passage/cmd/main.go
+          NAME="docker-credential-passage-${{ matrix.goos }}-${{ matrix.goarch }}"
+          [ "${{ matrix.goos }}" = "windows" ] && NAME="${NAME}.exe"
+
+          go build -ldflags="-s -w -X main.Version=${VERSION#v}" \
+            -o "bin/${NAME}" passage/cmd/main.go
+
+          cd bin
           
           # Create checksum
-          cd bin
-          sha256sum "${OUTPUT_NAME}" > "${OUTPUT_NAME}.sha256"
-
-      - name: Create archive
-        run: |
-          OUTPUT_NAME="docker-credential-passage-${{ matrix.goos }}-${{ matrix.goarch }}"
+          sha256sum "${NAME}" > "${NAME}.sha256"
+          
+          # Create archive (binary only)
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            OUTPUT_NAME="${OUTPUT_NAME}.exe"
-            cd bin
-            zip -r "docker-credential-passage-${{ matrix.goos }}-${{ matrix.goarch }}.zip" "${OUTPUT_NAME}"
+            zip "${NAME%.exe}.zip" "${NAME}"
           else
-            cd bin
-            tar -czf "${OUTPUT_NAME}.tar.gz" "${OUTPUT_NAME}"
+            tar -czf "${NAME}.tar.gz" "${NAME}"
           fi
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
@@ -89,23 +56,18 @@ jobs:
             bin/*.zip
             bin/*.sha256
 
-  create-release:
-    name: Create GitHub Release
+  release:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - uses: softprops/action-gh-release@v1
         with:
           files: artifacts/*
-          draft: false
-          prerelease: false
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -35,6 +35,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux builds
           - goos: linux
             goarch: amd64
           - goos: linux
@@ -43,9 +44,15 @@ jobs:
             goarch: "386"
           - goos: linux
             goarch: arm
+          # macOS builds
           - goos: darwin
             goarch: amd64
           - goos: darwin
+            goarch: arm64
+          # Windows builds
+          - goos: windows
+            goarch: amd64
+          - goos: windows
             goarch: arm64
     steps:
       - name: Checkout code
@@ -62,11 +69,14 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           OUTPUT_NAME="docker-credential-passage-${{ matrix.goos }}-${{ matrix.goarch }}"
-          go build -ldflags="-s -w" -o "bin/${OUTPUT_NAME}" passage/cmd/main.go
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            OUTPUT_NAME="${OUTPUT_NAME}.exe"
+          fi
+          go build -ldflags="-s -w -X main.Version=${VERSION}" -o "bin/${OUTPUT_NAME}" passage/cmd/main.go
           
           # Verify binary was created
           ls -la "bin/${OUTPUT_NAME}"
-          file "bin/${OUTPUT_NAME}"
+          file "bin/${OUTPUT_NAME}" || echo "file command not available"
 
   lint:
     name: Lint

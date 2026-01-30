@@ -36,6 +36,13 @@ jobs:
           - goos: darwin
             goarch: arm64
             runner: macos-latest
+          # Windows builds
+          - goos: windows
+            goarch: amd64
+            runner: ubuntu-latest
+          - goos: windows
+            goarch: arm64
+            runner: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -51,18 +58,31 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           OUTPUT_NAME="docker-credential-passage-${{ matrix.goos }}-${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            OUTPUT_NAME="${OUTPUT_NAME}.exe"
+          fi
           VERSION="${GITHUB_REF#refs/tags/}"
           go build -ldflags="-s -w -X main.Version=${VERSION}" -o "bin/${OUTPUT_NAME}" passage/cmd/main.go
           
           # Create checksum
           cd bin
-          shasum -a 256 "${OUTPUT_NAME}" > "${OUTPUT_NAME}.sha256"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            sha256sum "${OUTPUT_NAME}" > "${OUTPUT_NAME}.sha256"
+          else
+            shasum -a 256 "${OUTPUT_NAME}" > "${OUTPUT_NAME}.sha256"
+          fi
 
       - name: Create archive
         run: |
           OUTPUT_NAME="docker-credential-passage-${{ matrix.goos }}-${{ matrix.goarch }}"
-          cd bin
-          tar -czf "${OUTPUT_NAME}.tar.gz" "${OUTPUT_NAME}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            OUTPUT_NAME="${OUTPUT_NAME}.exe"
+            cd bin
+            zip -r "docker-credential-passage-${{ matrix.goos }}-${{ matrix.goarch }}.zip" "${OUTPUT_NAME}"
+          else
+            cd bin
+            tar -czf "${OUTPUT_NAME}.tar.gz" "${OUTPUT_NAME}"
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -70,6 +90,7 @@ jobs:
           name: ${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
             bin/*.tar.gz
+            bin/*.zip
             bin/*.sha256
 
   create-release:

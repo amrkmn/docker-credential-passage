@@ -38,14 +38,15 @@ jobs:
 
           cd bin
           
-          # Create checksum
-          sha256sum "${NAME}" > "${NAME}.sha256"
-          
-          # Create archive (binary only)
+          # Create archive first
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            zip "${NAME%.exe}.zip" "${NAME}"
+            ARCHIVE="${NAME%.exe}.zip"
+            zip "${ARCHIVE}" "${NAME}"
+            sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
           else
-            tar -czf "${NAME}.tar.gz" "${NAME}"
+            ARCHIVE="${NAME}.tar.gz"
+            tar -czf "${ARCHIVE}" "${NAME}"
+            sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
           fi
 
       - uses: actions/upload-artifact@v4

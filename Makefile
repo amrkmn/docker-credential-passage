@@ -5,7 +5,7 @@ BINARY_NAME := docker-credential-passage
 
 build:
 	@echo "+ $@"
-	@go build -o $(BUILD_DIR)/$(BINARY_NAME) passage/cmd/main.go
+	@go build -ldflags="-X github.com/amrkmn/docker-credential-passage/passage.Version=dev" -o $(BUILD_DIR)/$(BINARY_NAME) passage/cmd/main.go
 
 test:
 	@echo "+ $@"

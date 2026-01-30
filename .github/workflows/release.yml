@@ -52,7 +52,7 @@ jobs:
         run: |
           OUTPUT_NAME="docker-credential-passage-${{ matrix.goos }}-${{ matrix.goarch }}"
           VERSION="${GITHUB_REF#refs/tags/}"
-          go build -ldflags="-s -w -X github.com/amrkmn/docker-credential-passage/passage.Version=${VERSION}" -o "bin/${OUTPUT_NAME}" passage/cmd/main.go
+          go build -ldflags="-s -w -X main.Version=${VERSION}" -o "bin/${OUTPUT_NAME}" passage/cmd/main.go
           
           # Create checksum
           cd bin

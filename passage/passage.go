@@ -18,8 +18,13 @@ const (
 	PASS_FOLDER = "docker-credential-helpers"
 )
 
-// Version is set at build time via ldflags
-var Version = "dev"
+// version is set at build time via ldflags
+var version = "dev"
+
+// SetVersion sets the version string (called from main)
+func SetVersion(v string) {
+	version = v
+}
 
 type Passage struct{}
 
@@ -118,7 +123,7 @@ func (p Passage) List() (map[string]string, error) {
 
 // GetVersion returns the version string
 func (p Passage) Version() string {
-	return fmt.Sprintf("docker-credential-passage/%s", Version)
+	return fmt.Sprintf("docker-credential-passage/%s", version)
 }
 
 // ==================== IDENTITY MANAGEMENT ====================

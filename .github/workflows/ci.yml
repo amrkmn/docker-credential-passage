@@ -7,96 +7,70 @@ on:
     branches: [ main, develop ]
 
 jobs:
-  test:
-    name: Test
+  ci:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: 'stable'
 
-      - name: Run tests
+      - name: Test
         run: go test -v ./...
 
-      - name: Build (amd64)
+      - name: Build
         run: go build -o bin/docker-credential-passage passage/cmd/main.go
 
-      - name: Lint
+      - name: Vet
         run: go vet ./...
 
-  build-cross:
-    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Linux builds
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-          - goos: linux
-            goarch: "386"
-          - goos: linux
-            goarch: arm
-          # macOS builds
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
-          # Windows builds
-          - goos: windows
-            goarch: amd64
-          - goos: windows
-            goarch: arm64
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: 'stable'
-
-      - name: Build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-        run: |
-          OUTPUT_NAME="docker-credential-passage-${{ matrix.goos }}-${{ matrix.goarch }}"
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            OUTPUT_NAME="${OUTPUT_NAME}.exe"
-          fi
-          go build -ldflags="-s -w -X main.Version=${VERSION}" -o "bin/${OUTPUT_NAME}" passage/cmd/main.go
-          
-          # Verify binary was created
-          ls -la "bin/${OUTPUT_NAME}"
-          file "bin/${OUTPUT_NAME}" || echo "file command not available"
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: 'stable'
-
-      - name: Run go vet
-        run: go vet ./...
-
-      - name: Run go fmt
+      - name: Format Check
         run: |
           if [ -n "$(gofmt -s -l .)" ]; then
             echo "Go code is not formatted:"
             gofmt -s -l .
             exit 1
           fi
+
+  build-cross:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [linux-amd64, linux-arm64, linux-386, linux-arm, darwin-amd64, darwin-arm64, windows-amd64, windows-arm64]
+        include:
+          - target: linux-amd64
+            goos: linux
+            goarch: amd64
+          - target: linux-arm64
+            goos: linux
+            goarch: arm64
+          - target: linux-386
+            goos: linux
+            goarch: '386'
+          - target: linux-arm
+            goos: linux
+            goarch: arm
+          - target: darwin-amd64
+            goos: darwin
+            goarch: amd64
+          - target: darwin-arm64
+            goos: darwin
+            goarch: arm64
+          - target: windows-amd64
+            goos: windows
+            goarch: amd64
+          - target: windows-arm64
+            goos: windows
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Build ${{ matrix.target }}
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -ldflags="-s -w" -o bin/docker-credential-passage passage/cmd/main.go

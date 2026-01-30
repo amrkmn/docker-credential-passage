@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux builds
+          - goos: linux
+            goarch: amd64
+            runner: ubuntu-latest
+          - goos: linux
+            goarch: arm64
+            runner: ubuntu-latest
+          - goos: linux
+            goarch: "386"
+            runner: ubuntu-latest
+          - goos: linux
+            goarch: arm
+            runner: ubuntu-latest
+          # macOS builds
+          - goos: darwin
+            goarch: amd64
+            runner: macos-latest
+          - goos: darwin
+            goarch: arm64
+            runner: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          OUTPUT_NAME="docker-credential-passage-${{ matrix.goos }}-${{ matrix.goarch }}"
+          go build -ldflags="-s -w" -o "bin/${OUTPUT_NAME}" passage/cmd/main.go
+          
+          # Create checksum
+          cd bin
+          shasum -a 256 "${OUTPUT_NAME}" > "${OUTPUT_NAME}.sha256"
+
+      - name: Create archive
+        run: |
+          OUTPUT_NAME="docker-credential-passage-${{ matrix.goos }}-${{ matrix.goarch }}"
+          cd bin
+          tar -czf "${OUTPUT_NAME}.tar.gz" "${OUTPUT_NAME}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            bin/*.tar.gz
+            bin/*.sha256
+
+  create-release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

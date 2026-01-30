@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+            goarch: amd64
+          - os: ubuntu-latest
+            arch: arm64
+            goarch: arm64
+          - os: macos-latest
+            arch: amd64
+            goarch: amd64
+          - os: macos-latest
+            arch: arm64
+            goarch: arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Run tests
+        run: go test -v ./...
+
+      - name: Build
+        run: go build -o bin/docker-credential-passage passage/cmd/main.go
+
+      - name: Lint
+        run: go vet ./...
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run go fmt
+        run: |
+          if [ -n "$(gofmt -s -l .)" ]; then
+            echo "Go code is not formatted:"
+            gofmt -s -l .
+            exit 1
+          fi

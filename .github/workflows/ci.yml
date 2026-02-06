@@ -50,10 +50,7 @@ jobs:
             goarch: amd64
           - goos: darwin
             goarch: arm64
-          - goos: windows
-            goarch: amd64
-          - goos: windows
-            goarch: arm64
+          # Windows builds removed - passage is a bash-based tool not supported on Windows
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"filippo.io/age"
 	"github.com/amrkmn/docker-credential-passage/credentials"
@@ -266,6 +268,12 @@ func generateIdentity(name string) (*age.X25519Identity, error) {
 		return nil, fmt.Errorf("failed to write public key: %w", err)
 	}
 
+	// Also add to passage identities file if passage is installed
+	if err := addToPassageIdentities(identity); err != nil {
+		// Don't fail if we can't add to passage, just warn
+		fmt.Fprintf(os.Stderr, "Warning: failed to add to passage identities: %v\n", err)
+	}
+
 	// Print formatted output
 	fmt.Printf("✓ Identity created: %s\n", identityPath)
 	fmt.Printf("Public key: %s\n", publicKey)
@@ -274,6 +282,43 @@ func generateIdentity(name string) (*age.X25519Identity, error) {
 	fmt.Printf("   Identity file: %s\n", identityPath)
 
 	return identity, nil
+}
+
+// addToPassageIdentities adds a newly created identity to ~/.passage/identities file
+func addToPassageIdentities(identity *age.X25519Identity) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	passageDir := filepath.Join(home, ".passage")
+	identitiesFile := filepath.Join(passageDir, "identities")
+
+	// Check if passage is installed
+	if _, err := os.Stat(passageDir); err != nil {
+		// Passage not installed, skip
+		return nil
+	}
+
+	// Format the identity entry
+	created := time.Now().Format(time.RFC3339)
+	publicKey := identity.Recipient().String()
+	secretKey := identity.String()
+
+	entry := fmt.Sprintf("# created: %s\n# public key: %s\n%s\n\n", created, publicKey, secretKey)
+
+	// Append to identities file
+	f, err := os.OpenFile(identitiesFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to open passage identities file: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(entry); err != nil {
+		return fmt.Errorf("failed to write to passage identities file: %w", err)
+	}
+
+	return nil
 }
 
 // ensureDefaultIdentity creates default identity if missing
@@ -596,6 +641,7 @@ func (p Passage) SetupCommand(args []string) error {
 		fmt.Println("Available commands:")
 		fmt.Println("  docker-credential-passage setup identity [name]")
 		fmt.Println("  docker-credential-passage setup recipients")
+		fmt.Println("  docker-credential-passage setup sync")
 		fmt.Println()
 		fmt.Println("Current identity:", getActiveIdentityName())
 		fmt.Println("Recipients file:", recipientsPath())
@@ -607,6 +653,8 @@ func (p Passage) SetupCommand(args []string) error {
 		return setupIdentityCommand(args[1:])
 	case "recipients":
 		return setupRecipientsCommand(args[1:])
+	case "sync":
+		return syncIdentitiesCommand()
 	default:
 		return fmt.Errorf("unknown setup command: %s", args[0])
 	}
@@ -618,6 +666,55 @@ func setupIdentityCommand(args []string) error {
 		name = args[0]
 	}
 
+	// Check for existing .passage folder with identities
+	if name == "default" {
+		identities, err := findExistingPassageIdentities()
+		if err == nil && len(identities) > 0 {
+			// Found existing identities, show them to the user with useful info
+			fmt.Println("Found existing Passage identities:")
+			for i, identity := range identities {
+				fmt.Printf("  [%d] Created: %s\n", i+1, identity.Created)
+				fmt.Printf("       Public: %s\n", identity.PublicKey)
+			}
+			fmt.Println()
+			fmt.Print("Select an identity to use as default (number), or 'n' to create a new one: ")
+
+			var response string
+			fmt.Scanln(&response)
+
+			if response == "" || strings.ToLower(response) == "n" || strings.ToLower(response) == "no" {
+				// User wants to create a new identity, continue to generateIdentity
+			} else {
+				// Try to parse the selection
+				var selection int
+				_, err := fmt.Sscanf(response, "%d", &selection)
+				if err != nil || selection < 1 || selection > len(identities) {
+					return fmt.Errorf("invalid selection: %s", response)
+				}
+
+				selectedIdentity := identities[selection-1]
+
+				// Copy the existing identity to docker-credential-passage location
+				if err := copyExistingIdentity(selectedIdentity, name); err != nil {
+					return fmt.Errorf("failed to copy existing identity: %w", err)
+				}
+
+				fmt.Printf("✓ Using existing Passage identity as default\n")
+
+				// Add to recipients
+				identity, err := loadDefaultIdentity()
+				if err == nil {
+					if err := addRecipient(identity.Recipient()); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to add recipient: %v\n", err)
+					}
+				}
+
+				return nil
+			}
+			// User declined or selected to create new, continue to generateIdentity
+		}
+	}
+
 	identity, err := generateIdentity(name)
 	if err != nil {
 		return err
@@ -627,6 +724,189 @@ func setupIdentityCommand(args []string) error {
 	if name == "default" {
 		if err := addRecipient(identity.Recipient()); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to add recipient: %v\n", err)
+		}
+	}
+
+	// Check if passage is installed, prompt to create structure if not
+	home, err := os.UserHomeDir()
+	if err == nil {
+		passageDir := filepath.Join(home, ".passage")
+		if _, err := os.Stat(passageDir); err != nil && os.IsNotExist(err) {
+			fmt.Println()
+			fmt.Println("Note: Passage is not installed (~/.passage not found).")
+			fmt.Print("Would you like to create ~/.passage folder for passage integration? [y/N]: ")
+
+			var response string
+			fmt.Scanln(&response)
+
+			if strings.ToLower(response) == "y" || strings.ToLower(response) == "yes" {
+				// Create passage directory structure
+				if err := os.MkdirAll(passageDir, 0700); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to create ~/.passage: %v\n", err)
+				} else {
+					storeDir := filepath.Join(passageDir, "store")
+					if err := os.MkdirAll(storeDir, 0700); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to create ~/.passage/store: %v\n", err)
+					} else {
+						// Add this identity to passage
+						if err := addToPassageIdentities(identity); err != nil {
+							fmt.Fprintf(os.Stderr, "Warning: failed to add to passage: %v\n", err)
+						} else {
+							fmt.Println("✓ Created ~/.passage folder and synced identity")
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// findExistingPassageIdentities looks for existing identities in ~/.passage/identities file
+// IdentityInfo holds information about an identity found in the passage file
+type IdentityInfo struct {
+	Index      int
+	Created    string
+	PublicKey  string
+	FilePath   string
+	RawContent string
+}
+
+// findExistingPassageIdentities looks for existing identities in ~/.passage/identities file
+// findExistingPassageIdentities looks for existing identities in ~/.passage/identities file
+func findExistingPassageIdentities() ([]IdentityInfo, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+
+	passageDir := filepath.Join(home, ".passage")
+
+	// Check if .passage folder exists - if not, passage is not installed
+	info, err := os.Stat(passageDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("passage is not installed (no ~/.passage folder found)")
+		}
+		return nil, fmt.Errorf("cannot access ~/.passage: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("~/.passage is not a directory")
+	}
+
+	// Check for identities file (not folder)
+	identitiesFile := filepath.Join(passageDir, "identities")
+	info, err = os.Stat(identitiesFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("passage identities file not found")
+		}
+		return nil, fmt.Errorf("cannot access passage identities file: %w", err)
+	}
+	if info.IsDir() {
+		return nil, fmt.Errorf("~/.passage/identities is a directory, expected a file")
+	}
+
+	// Check for store folder
+	storeDir := filepath.Join(passageDir, "store")
+	info, err = os.Stat(storeDir)
+	if err != nil || !info.IsDir() {
+		return nil, fmt.Errorf("passage store folder not found")
+	}
+
+	// Read the identities file content
+	content, err := os.ReadFile(identitiesFile)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse the file to extract individual identities with their metadata
+	var identities []IdentityInfo
+	lines := strings.Split(string(content), "\n")
+
+	var currentIdentity *IdentityInfo
+	var currentContent []string
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Check for created comment
+		if strings.HasPrefix(trimmed, "# created:") {
+			// Start of a new identity
+			if currentIdentity != nil && len(currentContent) > 0 {
+				currentIdentity.RawContent = strings.Join(currentContent, "\n")
+				identities = append(identities, *currentIdentity)
+			}
+			currentIdentity = &IdentityInfo{
+				Index:    len(identities),
+				FilePath: identitiesFile,
+			}
+			currentContent = []string{line}
+			// Extract created date
+			if idx := strings.Index(trimmed, ":"); idx != -1 {
+				currentIdentity.Created = strings.TrimSpace(trimmed[idx+1:])
+			}
+		} else if strings.HasPrefix(trimmed, "# public key:") && currentIdentity != nil {
+			currentContent = append(currentContent, line)
+			// Extract public key
+			if idx := strings.Index(trimmed, ":"); idx != -1 {
+				currentIdentity.PublicKey = strings.TrimSpace(trimmed[idx+1:])
+			}
+		} else if strings.HasPrefix(trimmed, "AGE-SECRET-KEY-") && currentIdentity != nil {
+			currentContent = append(currentContent, line)
+		} else if trimmed == "" {
+			// Empty line - end of current identity
+			if currentIdentity != nil && len(currentContent) > 0 {
+				currentIdentity.RawContent = strings.Join(currentContent, "\n")
+				identities = append(identities, *currentIdentity)
+				currentIdentity = nil
+				currentContent = nil
+			}
+		} else if currentIdentity != nil {
+			currentContent = append(currentContent, line)
+		}
+	}
+
+	// Don't forget the last identity
+	if currentIdentity != nil && len(currentContent) > 0 {
+		currentIdentity.RawContent = strings.Join(currentContent, "\n")
+		identities = append(identities, *currentIdentity)
+	}
+
+	if len(identities) == 0 {
+		return nil, fmt.Errorf("no identities found in .passage/identities")
+	}
+
+	return identities, nil
+}
+
+// copyExistingIdentity copies a specific identity from the passage identities file
+func copyExistingIdentity(identityInfo IdentityInfo, identityName string) error {
+	// Ensure identities directory exists
+	if err := ensureDir(identitiesDir()); err != nil {
+		return fmt.Errorf("failed to create identities directory: %w", err)
+	}
+
+	// Write the identity content to the destination
+	destPath := filepath.Join(identitiesDir(), identityName+".txt")
+	content := identityInfo.RawContent
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	if err := os.WriteFile(destPath, []byte(content), 0600); err != nil {
+		return fmt.Errorf("failed to write identity file: %w", err)
+	}
+
+	// Also save the public key
+	destPubPath := filepath.Join(identitiesDir(), identityName+".pub")
+	if identityInfo.PublicKey != "" {
+		pubKeyContent := identityInfo.PublicKey
+		if !strings.HasSuffix(pubKeyContent, "\n") {
+			pubKeyContent += "\n"
+		}
+		if err := os.WriteFile(destPubPath, []byte(pubKeyContent), 0644); err != nil {
+			return fmt.Errorf("failed to write public key file: %w", err)
 		}
 	}
 
@@ -722,4 +1002,116 @@ func (p Passage) IdentitiesCommand(args []string) error {
 	}
 
 	return fmt.Errorf("invalid identities command: %s", args[0])
+}
+
+// syncIdentitiesCommand syncs all docker-credential-passage identities to passage
+// syncIdentitiesCommand syncs all docker-credential-passage identities to passage
+// syncIdentitiesCommand syncs all docker-credential-passage identities to passage
+func syncIdentitiesCommand() error {
+	// Check if passage binary exists in PATH
+	passageInstalled := isPassageInstalled()
+
+	// Check if passage directory exists
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	passageDir := filepath.Join(home, ".passage")
+	dirExists := false
+	if _, err := os.Stat(passageDir); err == nil {
+		dirExists = true
+	}
+
+	// If neither binary nor directory exists, ask user
+	if !passageInstalled && !dirExists {
+		fmt.Println("Passage is not detected:")
+		fmt.Println("  - passage binary not found in PATH")
+		fmt.Println("  - ~/.passage folder not found")
+		fmt.Println()
+		fmt.Println("To install passage, visit: https://github.com/FiloSottile/passage")
+		fmt.Println()
+		fmt.Print("Would you like to create ~/.passage folder for passage integration? [y/N]: ")
+
+		var response string
+		fmt.Scanln(&response)
+
+		if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
+			fmt.Println("Sync cancelled. Identities remain in docker-credential-passage only.")
+			return nil
+		}
+
+		// Create passage directory structure
+		if err := os.MkdirAll(passageDir, 0700); err != nil {
+			return fmt.Errorf("failed to create ~/.passage directory: %w", err)
+		}
+
+		storeDir := filepath.Join(passageDir, "store")
+		if err := os.MkdirAll(storeDir, 0700); err != nil {
+			return fmt.Errorf("failed to create ~/.passage/store directory: %w", err)
+		}
+
+		fmt.Println("✓ Created ~/.passage folder structure")
+		fmt.Println("Note: You will need to install passage to use these identities.")
+		fmt.Println("      Visit: https://github.com/FiloSottile/passage")
+	} else if !passageInstalled {
+		// Directory exists but binary not found
+		fmt.Println("Note: passage binary not found in PATH, but ~/.passage folder exists.")
+		fmt.Println("      You may need to install passage to use these identities.")
+		fmt.Println("      Visit: https://github.com/FiloSottile/passage")
+		fmt.Println()
+	}
+
+	// Get all identities from docker-credential-passage
+	identitiesDir := identitiesDir()
+	entries, err := os.ReadDir(identitiesDir)
+	if err != nil {
+		return fmt.Errorf("failed to read identities directory: %w", err)
+	}
+
+	var syncedCount int
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".txt") {
+			continue
+		}
+
+		identityName := strings.TrimSuffix(name, ".txt")
+		identityPath := filepath.Join(identitiesDir, name)
+
+		// Read the identity
+		content, err := os.ReadFile(identityPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to read identity %s: %v\n", identityName, err)
+			continue
+		}
+
+		// Parse it to get public key
+		identity, err := age.ParseX25519Identity(strings.TrimSpace(string(content)))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to parse identity %s: %v\n", identityName, err)
+			continue
+		}
+
+		// Add to passage
+		if err := addToPassageIdentities(identity); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to sync identity %s: %v\n", identityName, err)
+			continue
+		}
+
+		syncedCount++
+		fmt.Printf("✓ Synced identity: %s\n", identityName)
+	}
+
+	fmt.Printf("\n✓ Synced %d identity(ies) to ~/.passage/identities\n", syncedCount)
+	return nil
+}
+
+// isPassageInstalled checks if the passage binary exists in PATH
+func isPassageInstalled() bool {
+	_, err := exec.LookPath("passage")
+	return err == nil
 }

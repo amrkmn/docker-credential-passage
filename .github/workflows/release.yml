@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        goos: [linux, darwin, windows]
+        goos: [linux, darwin]
         goarch: [amd64, arm64]
         include:
           - goos: linux
@@ -31,30 +31,22 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: |
           NAME="docker-credential-passage-${{ matrix.goos }}-${{ matrix.goarch }}"
-          [ "${{ matrix.goos }}" = "windows" ] && NAME="${NAME}.exe"
 
           go build -ldflags="-s -w -X main.Version=${VERSION#v}" \
             -o "bin/${NAME}" passage/cmd/main.go
 
           cd bin
           
-          # Create archive first
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            ARCHIVE="${NAME%.exe}.zip"
-            zip "${ARCHIVE}" "${NAME}"
-            sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
-          else
-            ARCHIVE="${NAME}.tar.gz"
-            tar -czf "${ARCHIVE}" "${NAME}"
-            sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
-          fi
+          # Create archive
+          ARCHIVE="${NAME}.tar.gz"
+          tar -czf "${ARCHIVE}" "${NAME}"
+          sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
             bin/*.tar.gz
-            bin/*.zip
             bin/*.sha256
 
   release:

@@ -125,7 +125,7 @@ func (p Passage) List() (map[string]string, error) {
 
 // GetVersion returns the version string
 func (p Passage) Version() string {
-	return fmt.Sprintf("docker-credential-passage/%s", version)
+	return version
 }
 
 // ==================== IDENTITY MANAGEMENT ====================

@@ -11,23 +11,23 @@ Secure Docker credential storage using [age](https://age-encryption.org) encrypt
 
 ## Installation
 
-Download the binary:
+### Quick Install (Recommended)
 
 ```bash
-# Linux AMD64
-curl -sSL https://github.com/amrkmn/docker-credential-passage/releases/latest/download/docker-credential-passage-linux-amd64 -o /usr/local/bin/docker-credential-passage
-chmod +x /usr/local/bin/docker-credential-passage
-
-# macOS ARM64
-curl -sSL https://github.com/amrkmn/docker-credential-passage/releases/latest/download/docker-credential-passage-darwin-arm64 -o /usr/local/bin/docker-credential-passage
-chmod +x /usr/local/bin/docker-credential-passage
+curl -fsSL https://raw.githubusercontent.com/amrkmn/docker-credential-passage/main/install.sh | sh
 ```
 
-Or build from source:
+Or install to a custom directory:
+```bash
+INSTALL_DIR=~/.local/bin curl -fsSL https://raw.githubusercontent.com/amrkmn/docker-credential-passage/main/install.sh | sh
+```
+
+### Build from Source
+
 ```bash
 git clone https://github.com/amrkmn/docker-credential-passage.git
 cd docker-credential-passage
-make build && make install
+go build -o bin/docker-credential-passage passage/cmd/main.go
 ```
 
 ## Quick Start

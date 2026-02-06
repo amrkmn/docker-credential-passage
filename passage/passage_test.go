@@ -3,6 +3,7 @@ package passage
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -16,8 +17,12 @@ func TestPassageVersion(t *testing.T) {
 	if version == "" {
 		t.Error("Version should not be empty")
 	}
-	if !strings.Contains(version, "docker-credential-passage") {
-		t.Error("Version should contain package name")
+	// Check version is either "dev" or in semver format (e.g., 0.1.3)
+	if version != "dev" {
+		matched, _ := regexp.MatchString(`^\d+\.\d+\.\d+`, version)
+		if !matched {
+			t.Error("Version should be 'dev' or in semver format (e.g., 0.1.3)")
+		}
 	}
 }
 

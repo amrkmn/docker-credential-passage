@@ -351,10 +351,8 @@ func getDockerDir() string {
 	return filepath.Join(home, ".docker-credential-passage")
 }
 
-// loadRecipients loads recipients from file (Age CLI compatible format)
-func loadRecipients() ([]age.Recipient, error) {
-	path := recipientsPath()
-
+// loadRecipientsFrom loads recipients from the given file path (Age CLI compatible format)
+func loadRecipientsFrom(path string) ([]age.Recipient, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -372,11 +370,13 @@ func loadRecipients() ([]age.Recipient, error) {
 	return recipients, nil
 }
 
-// saveRecipients saves recipients to file
-func saveRecipients(recipients []age.Recipient) error {
-	path := recipientsPath()
+// loadRecipients loads recipients from the default recipients file
+func loadRecipients() ([]age.Recipient, error) {
+	return loadRecipientsFrom(recipientsPath())
+}
 
-	// Ensure directory exists
+// saveRecipientsTo saves recipients to the given file path
+func saveRecipientsTo(path string, recipients []age.Recipient, header string) error {
 	dir := filepath.Dir(path)
 	if err := ensureDir(dir); err != nil {
 		return err
@@ -388,12 +388,12 @@ func saveRecipients(recipients []age.Recipient) error {
 	}
 	defer file.Close()
 
-	// Write header comment
-	if _, err := file.WriteString("# Age recipients for docker-credential-passage\n"); err != nil {
-		return err
+	if header != "" {
+		if _, err := file.WriteString(header + "\n"); err != nil {
+			return err
+		}
 	}
 
-	// Write each recipient
 	for _, r := range recipients {
 		recipientStr, ok := r.(*age.X25519Recipient)
 		if !ok {
@@ -405,6 +405,11 @@ func saveRecipients(recipients []age.Recipient) error {
 	}
 
 	return nil
+}
+
+// saveRecipients saves recipients to the default recipients file
+func saveRecipients(recipients []age.Recipient) error {
+	return saveRecipientsTo(recipientsPath(), recipients, "# Age recipients for docker-credential-passage")
 }
 
 // ensureRecipients ensures recipients file exists with default identity
@@ -572,6 +577,31 @@ func getPassageDirStatic() string {
 	return filepath.Join(home, ".passage", "store")
 }
 
+// passageRecipientsPath returns the path to the passage store recipients file
+func passageRecipientsPath() string {
+	return filepath.Join(getPassageDirStatic(), ".age-recipients")
+}
+
+// addToPassageRecipients adds a recipient to the passage store recipients file
+func addToPassageRecipients(recipient age.Recipient) error {
+	path := passageRecipientsPath()
+
+	recipients, err := loadRecipientsFrom(path)
+	if err != nil {
+		return err
+	}
+
+	recipientStr := recipient.(*age.X25519Recipient).String()
+	for _, r := range recipients {
+		if r.(*age.X25519Recipient).String() == recipientStr {
+			return nil
+		}
+	}
+
+	recipients = append(recipients, recipient)
+	return saveRecipientsTo(path, recipients, "# Age recipients for passage store")
+}
+
 // listUsernames returns a list of usernames for a specific server URL
 func listUsernames(encodedURL string) ([]string, error) {
 	dir := filepath.Join(getPassageDirStatic(), PASS_FOLDER, encodedURL)
@@ -707,6 +737,9 @@ func setupIdentityCommand(args []string) error {
 					if err := addRecipient(identity.Recipient()); err != nil {
 						fmt.Fprintf(os.Stderr, "Warning: failed to add recipient: %v\n", err)
 					}
+					if err := addToPassageRecipients(identity.Recipient()); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to add recipient to passage store: %v\n", err)
+					}
 				}
 
 				return nil
@@ -724,6 +757,9 @@ func setupIdentityCommand(args []string) error {
 	if name == "default" {
 		if err := addRecipient(identity.Recipient()); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to add recipient: %v\n", err)
+		}
+		if err := addToPassageRecipients(identity.Recipient()); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to add recipient to passage store: %v\n", err)
 		}
 	}
 
@@ -996,6 +1032,9 @@ func (p Passage) IdentitiesCommand(args []string) error {
 		if name == "default" {
 			if err := addRecipient(identity.Recipient()); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to add recipient: %v\n", err)
+			}
+			if err := addToPassageRecipients(identity.Recipient()); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to add recipient to passage store: %v\n", err)
 			}
 		}
 		return nil

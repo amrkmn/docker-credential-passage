@@ -106,8 +106,8 @@ func Store(h Helper, reader io.Reader) error {
 		return err
 	}
 
-	if err := creds.Validate(); err != nil {
-		return err
+	if creds.ServerURL == "" {
+		return NewErrCredentialsMissingServerURL()
 	}
 
 	return h.Add(&creds)

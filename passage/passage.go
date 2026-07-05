@@ -61,6 +61,8 @@ func (p Passage) Add(creds *credentials.Credentials) error {
 		return fmt.Errorf("failed to save credentials: %w", err)
 	}
 
+	gitAddFile(path, fmt.Sprintf("Store credentials for %s (%s)", creds.ServerURL, creds.Username))
+
 	return nil
 }
 
@@ -71,7 +73,13 @@ func (p Passage) Delete(serverURL string) error {
 	}
 
 	encoded := encodeServerURL(serverURL)
-	return deleteServerDir(filepath.Join(getPassageDirStatic(), PASS_FOLDER, encoded))
+	path := filepath.Join(getPassageDirStatic(), PASS_FOLDER, encoded)
+	if err := deleteServerDir(path); err != nil {
+		return err
+	}
+
+	gitAddDir(path, "Delete credentials for "+serverURL)
+	return nil
 }
 
 // Get retrieves credentials for a server URL
@@ -334,21 +342,16 @@ func ensureDefaultIdentity() (*age.X25519Identity, error) {
 
 // ==================== RECIPIENT MANAGEMENT ====================
 
-// recipientsPath returns the path to the recipients file
+// recipientsPath returns the path to the recipients file.
+// Defaults to ~/.passage/store/.age-recipients (shared with passage).
 func recipientsPath() string {
 	if path := os.Getenv("DOCKER_CREDENTIAL_PASSAGE_RECIPIENTS"); path != "" {
 		return path
 	}
-	return filepath.Join(getDockerDir(), "store", ".age-recipients")
-}
-
-// getDockerDir returns the Docker-specific directory
-func getDockerDir() string {
 	if dir := os.Getenv("DOCKER_CREDENTIAL_PASSAGE_DIR"); dir != "" {
-		return dir
+		return filepath.Join(dir, "store", ".age-recipients")
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".docker-credential-passage")
+	return filepath.Join(getPassageDirStatic(), ".age-recipients")
 }
 
 // loadRecipientsFrom loads recipients from the given file path (Age CLI compatible format)
@@ -577,31 +580,6 @@ func getPassageDirStatic() string {
 	return filepath.Join(home, ".passage", "store")
 }
 
-// passageRecipientsPath returns the path to the passage store recipients file
-func passageRecipientsPath() string {
-	return filepath.Join(getPassageDirStatic(), ".age-recipients")
-}
-
-// addToPassageRecipients adds a recipient to the passage store recipients file
-func addToPassageRecipients(recipient age.Recipient) error {
-	path := passageRecipientsPath()
-
-	recipients, err := loadRecipientsFrom(path)
-	if err != nil {
-		return err
-	}
-
-	recipientStr := recipient.(*age.X25519Recipient).String()
-	for _, r := range recipients {
-		if r.(*age.X25519Recipient).String() == recipientStr {
-			return nil
-		}
-	}
-
-	recipients = append(recipients, recipient)
-	return saveRecipientsTo(path, recipients, "# Age recipients for passage store")
-}
-
 // listUsernames returns a list of usernames for a specific server URL
 func listUsernames(encodedURL string) ([]string, error) {
 	dir := filepath.Join(getPassageDirStatic(), PASS_FOLDER, encodedURL)
@@ -702,9 +680,9 @@ func setupIdentityCommand(args []string) error {
 		if err == nil && len(identities) > 0 {
 			// Found existing identities, show them to the user with useful info
 			fmt.Println("Found existing Passage identities:")
-			for i, identity := range identities {
-				fmt.Printf("  [%d] Created: %s\n", i+1, identity.Created)
-				fmt.Printf("       Public: %s\n", identity.PublicKey)
+			for i, id := range identities {
+				fmt.Printf("  [%d] Created: %s\n", i+1, id.Created)
+				fmt.Printf("       Public: %s\n", id.PublicKey)
 			}
 			fmt.Println()
 			fmt.Print("Select an identity to use as default (number), or 'n' to create a new one: ")
@@ -737,9 +715,6 @@ func setupIdentityCommand(args []string) error {
 					if err := addRecipient(identity.Recipient()); err != nil {
 						fmt.Fprintf(os.Stderr, "Warning: failed to add recipient: %v\n", err)
 					}
-					if err := addToPassageRecipients(identity.Recipient()); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: failed to add recipient to passage store: %v\n", err)
-					}
 				}
 
 				return nil
@@ -757,9 +732,6 @@ func setupIdentityCommand(args []string) error {
 	if name == "default" {
 		if err := addRecipient(identity.Recipient()); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to add recipient: %v\n", err)
-		}
-		if err := addToPassageRecipients(identity.Recipient()); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to add recipient to passage store: %v\n", err)
 		}
 	}
 
@@ -800,8 +772,7 @@ func setupIdentityCommand(args []string) error {
 }
 
 // findExistingPassageIdentities looks for existing identities in ~/.passage/identities file
-// IdentityInfo holds information about an identity found in the passage file
-type IdentityInfo struct {
+type identityInfo struct {
 	Index      int
 	Created    string
 	PublicKey  string
@@ -810,8 +781,7 @@ type IdentityInfo struct {
 }
 
 // findExistingPassageIdentities looks for existing identities in ~/.passage/identities file
-// findExistingPassageIdentities looks for existing identities in ~/.passage/identities file
-func findExistingPassageIdentities() ([]IdentityInfo, error) {
+func findExistingPassageIdentities() ([]identityInfo, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
@@ -858,10 +828,10 @@ func findExistingPassageIdentities() ([]IdentityInfo, error) {
 	}
 
 	// Parse the file to extract individual identities with their metadata
-	var identities []IdentityInfo
+	var identities []identityInfo
 	lines := strings.Split(string(content), "\n")
 
-	var currentIdentity *IdentityInfo
+	var currentIdentity *identityInfo
 	var currentContent []string
 
 	for _, line := range lines {
@@ -874,7 +844,7 @@ func findExistingPassageIdentities() ([]IdentityInfo, error) {
 				currentIdentity.RawContent = strings.Join(currentContent, "\n")
 				identities = append(identities, *currentIdentity)
 			}
-			currentIdentity = &IdentityInfo{
+			currentIdentity = &identityInfo{
 				Index:    len(identities),
 				FilePath: identitiesFile,
 			}
@@ -918,7 +888,7 @@ func findExistingPassageIdentities() ([]IdentityInfo, error) {
 }
 
 // copyExistingIdentity copies a specific identity from the passage identities file
-func copyExistingIdentity(identityInfo IdentityInfo, identityName string) error {
+func copyExistingIdentity(info identityInfo, identityName string) error {
 	// Ensure identities directory exists
 	if err := ensureDir(identitiesDir()); err != nil {
 		return fmt.Errorf("failed to create identities directory: %w", err)
@@ -926,7 +896,7 @@ func copyExistingIdentity(identityInfo IdentityInfo, identityName string) error 
 
 	// Write the identity content to the destination
 	destPath := filepath.Join(identitiesDir(), identityName+".txt")
-	content := identityInfo.RawContent
+	content := info.RawContent
 	if !strings.HasSuffix(content, "\n") {
 		content += "\n"
 	}
@@ -936,8 +906,8 @@ func copyExistingIdentity(identityInfo IdentityInfo, identityName string) error 
 
 	// Also save the public key
 	destPubPath := filepath.Join(identitiesDir(), identityName+".pub")
-	if identityInfo.PublicKey != "" {
-		pubKeyContent := identityInfo.PublicKey
+	if info.PublicKey != "" {
+		pubKeyContent := info.PublicKey
 		if !strings.HasSuffix(pubKeyContent, "\n") {
 			pubKeyContent += "\n"
 		}
@@ -1033,9 +1003,6 @@ func (p Passage) IdentitiesCommand(args []string) error {
 			if err := addRecipient(identity.Recipient()); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to add recipient: %v\n", err)
 			}
-			if err := addToPassageRecipients(identity.Recipient()); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to add recipient to passage store: %v\n", err)
-			}
 		}
 		return nil
 	}
@@ -1043,8 +1010,6 @@ func (p Passage) IdentitiesCommand(args []string) error {
 	return fmt.Errorf("invalid identities command: %s", args[0])
 }
 
-// syncIdentitiesCommand syncs all docker-credential-passage identities to passage
-// syncIdentitiesCommand syncs all docker-credential-passage identities to passage
 // syncIdentitiesCommand syncs all docker-credential-passage identities to passage
 func syncIdentitiesCommand() error {
 	// Check if passage binary exists in PATH

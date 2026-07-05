@@ -33,7 +33,7 @@ jobs:
           NAME="docker-credential-passage-${{ matrix.goos }}-${{ matrix.goarch }}"
 
           go build -ldflags="-s -w -X main.Version=${VERSION#v}" \
-            -o "bin/${NAME}" passage/cmd/main.go
+            -o "bin/${NAME}" cmd/docker-credential-passage/main.go
 
           cd bin
           

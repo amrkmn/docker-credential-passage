@@ -19,7 +19,7 @@ jobs:
         run: go test -v ./...
 
       - name: Build
-        run: go build -o bin/docker-credential-passage passage/cmd/main.go
+        run: go build -o bin/docker-credential-passage cmd/docker-credential-passage/main.go
 
       - name: Vet
         run: go vet ./...
@@ -61,4 +61,4 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: go build -ldflags="-s -w" -o bin/docker-credential-passage passage/cmd/main.go
+        run: go build -ldflags="-s -w" -o bin/docker-credential-passage cmd/docker-credential-passage/main.go

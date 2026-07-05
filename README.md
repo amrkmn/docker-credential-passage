@@ -27,7 +27,7 @@ INSTALL_DIR=~/.local/bin curl -fsSL https://raw.githubusercontent.com/amrkmn/doc
 ```bash
 git clone https://github.com/amrkmn/docker-credential-passage.git
 cd docker-credential-passage
-go build -o bin/docker-credential-passage passage/cmd/main.go
+go build -o bin/docker-credential-passage cmd/docker-credential-passage/main.go
 ```
 
 ## Quick Start

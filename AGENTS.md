@@ -7,13 +7,13 @@ A Docker credential helper using age encryption. Written in Go 1.24.0 with zero 
 
 ```bash
 # Build the binary
-go build -o bin/docker-credential-passage passage/cmd/main.go
+go build -o bin/docker-credential-passage cmd/docker-credential-passage/main.go
 
 # Build with release flags
-go build -ldflags="-s -w" -o bin/docker-credential-passage passage/cmd/main.go
+go build -ldflags="-s -w" -o bin/docker-credential-passage cmd/docker-credential-passage/main.go
 
 # Cross-compile (set GOOS/GOARCH)
-GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/docker-credential-passage passage/cmd/main.go
+GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/docker-credential-passage cmd/docker-credential-passage/main.go
 ```
 
 ## Test Commands
@@ -119,18 +119,21 @@ go mod tidy
 
 ### Project Structure
 ```
-├── credentials/          # Credential helper interface
-│   ├── credentials.go   # Types and errors
-│   └── helper.go        # Helper interface and command handling
-├── passage/             # Main implementation
-│   ├── passage.go       # Core logic
-│   ├── passage_test.go  # Tests
-│   └── cmd/
-│       └── main.go      # Entry point
-├── .github/workflows/   # CI/CD
-│   └── ci.yml
-├── go.mod               # Module definition (Go 1.24.0)
-└── bin/                 # Build output
+├── cmd/
+│   └── docker-credential-passage/
+│       └── main.go          # Entry point
+├── credentials/             # Credential helper interface
+│   ├── credentials.go      # Types and errors
+│   └── helper.go           # Helper interface and command handling
+├── passage/                 # Main implementation
+│   ├── passage.go          # Core logic
+│   ├── passage_test.go     # Tests
+│   └── git.go              # Git auto-commit
+├── .github/workflows/       # CI/CD
+│   ├── ci.yml
+│   └── release.yml
+├── go.mod                   # Module definition (Go 1.24.0)
+└── bin/                     # Build output
 ```
 
 ### Environment Variables
